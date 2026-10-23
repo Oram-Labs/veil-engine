@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all --check
+
+  test:
+    name: test (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --all-targets --all-features --locked -- -D warnings
+      - run: cargo test --all-targets --locked
+      - run: cargo test --doc --locked
+      # Without its optional parts (the phone detector, JSON Schema) the
+      # engine still builds, and refuses rules that need the phone detector.
+      - name: Engine without default features
+        run: |
+          cargo clippy --locked -p veil-engine --no-default-features --all-targets -- -D warnings
+          cargo test --locked -p veil-engine --no-default-features --lib phone_detection_is_on_by_default_only_when_built_in
+
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      # The engine promises no file or network access and no logging. Its own
+      # code is checked by crates/engine/tests/guarantees.rs; this checks what
+      # it depends on.
+      - name: Engine dependencies do no I/O
+        run: |
+          deps=$(cargo tree --locked -p veil-engine -e normal --all-features --prefix none --format '{lib}' | sed 's/ (\*)$//' | sort -u)
+          if grep -xE 'tokio|mio|socket2|hyper|reqwest|ureq|curl|tracing|log|env_logger|rusqlite|libsqlite3_sys|getrandom|rand|tempfile|dirs|walkdir|keyring|notify' <<<"$deps"; then
+            echo "veil-engine now depends on the crates above, which can do I/O. Review them."
+            exit 1
+          fi
+      - name: Docs build without warnings
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked --no-deps --all-features
+      - name: The engine packages for crates.io
+        run: cargo publish --locked --dry-run -p veil-engine

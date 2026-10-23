@@ -1,0 +1,26 @@
+[package]
+name = "veil-vault"
+description = "Encrypted on-disk vault for placeholder mappings."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["redaction", "privacy", "encryption", "pii", "sqlite"]
+categories = ["cryptography", "database"]
+
+[dependencies]
+aes-gcm.workspace = true
+veil-engine.workspace = true
+getrandom.workspace = true
+hkdf.workspace = true
+hmac.workspace = true
+keyring.workspace = true
+lru.workspace = true
+rusqlite.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true

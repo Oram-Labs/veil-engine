@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc dc394c485052d3d5c7a6b718e77c05deb780fdf6edb03e4b9efeca4d6cf31226 # shrinks to text = "\\[EMAIL\\_1\\]", cuts = []
+cc 5e9242344a2ad9c7d9e621d0bd85442ba5c06eec3ad306b5796d86a957d3f09e # shrinks to text = "[[EMAIL_1][EMAIL_1][EMAIL_1][EMAIL_1][EMAIL_2[EMAIL_1]00A0a\néAAEMAIL_2[AA[EMAIL_1]\\[EMAIL\\_1\\]EMAIL_2[ email 1 ][ email 1 ][EMAIL_1]", cuts = [Index(8810385229234412713)]
+cc 7880b84577a9d5ae85971a4550ec06d8ef5207780127f17456795ebd69d8ea5e # shrinks to text = "[EMAIL_1][\nEMAIL_2\\[EMAIL\\_1\\]", cuts = [Index(6545618864864679606)]
