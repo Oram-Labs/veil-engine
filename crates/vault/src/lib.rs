@@ -353,6 +353,44 @@ impl SqliteVault {
         Ok(Some(value))
     }
 
+    fn adopt_inner(&self, from: &ScopeId, into: &ScopeId) -> Result<bool, Error> {
+        if from == into {
+            return Ok(false);
+        }
+        let mut conn = self.conn()?;
+        let tx = conn.transaction()?;
+        let used: Option<i64> = tx
+            .query_row("SELECT 1 FROM counters WHERE scope = ?1 LIMIT 1", params![into.as_str()], |r| r.get(0))
+            .optional()?;
+        if used.is_some() {
+            return Ok(false);
+        }
+        tx.execute(
+            "INSERT INTO counters (scope, kind, last) SELECT ?2, kind, last FROM counters WHERE scope = ?1",
+            params![from.as_str(), into.as_str()],
+        )?;
+        let rows: Vec<(String, i64, Vec<u8>)> = {
+            let mut stmt = tx.prepare("SELECT kind, n, value_ct FROM entries WHERE scope = ?1")?;
+            let rows = stmt.query_map(params![from.as_str()], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+            rows.collect::<Result<_, _>>()?
+        };
+        let now = now();
+        for (kind, n, blob) in rows {
+            let kind = EntityKind::new(&kind).map_err(|_| Error::Decrypt)?;
+            // Ciphertexts are bound to their scope and number, so each is sealed again.
+            let value = self.decrypt(from, &kind, n as u64, &blob)?;
+            let mac = self.keys.mac(&[into.as_str().as_bytes(), kind.as_str().as_bytes(), value.as_bytes()]);
+            let ct = self.encrypt(into, &kind, n as u64, &value)?;
+            tx.execute(
+                "INSERT INTO entries (scope, kind, n, value_mac, value_ct, created_at, last_used_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+                params![into.as_str(), kind.as_str(), n, mac, ct, now],
+            )?;
+        }
+        tx.commit()?;
+        Ok(true)
+    }
+
     fn clear_caches(&self) -> Result<(), Error> {
         let mut c = self.caches()?;
         c.by_value.clear();
@@ -434,6 +472,10 @@ impl ManagedVault for SqliteVault {
         let cutoff = now() - self.ttl.as_secs() as i64;
         self.purge_before(cutoff)
     }
+
+    fn adopt(&self, from: &ScopeId, into: &ScopeId) -> Result<bool, Error> {
+        self.adopt_inner(from, into)
+    }
 }
 
 fn now() -> i64 {
@@ -486,6 +528,32 @@ mod tests {
 
     fn open(dir: &tempfile::TempDir, key: &MasterKey) -> SqliteVault {
         SqliteVault::open(&dir.path().join("vault.db"), key, 7 * DAY).unwrap()
+    }
+
+    #[test]
+    fn adopt_copies_a_scope_into_an_unused_one() {
+        let dir = tempfile::tempdir().unwrap();
+        let key = random_key();
+        let v = open(&dir, &key);
+        let (draft, chat) = (v.conversation_scope("draft"), v.conversation_scope("chat"));
+        let email = kind("EMAIL");
+        assert_eq!(v.get_or_create(&draft, &email, "ana@example.org").unwrap(), 1);
+        assert_eq!(v.get_or_create(&draft, &email, "bob@example.org").unwrap(), 2);
+        assert!(v.adopt(&draft, &chat).unwrap());
+        assert_eq!(v.lookup(&chat, &email, 2).unwrap().as_deref(), Some("bob@example.org"));
+        // The same values keep their numbers, and new ones come after.
+        assert_eq!(v.get_or_create(&chat, &email, "ana@example.org").unwrap(), 1);
+        assert_eq!(v.get_or_create(&chat, &email, "cy@example.org").unwrap(), 3);
+        // A scope that has handed out numbers is never written over.
+        let other = v.conversation_scope("other");
+        v.get_or_create(&other, &email, "cy@example.org").unwrap();
+        assert!(!v.adopt(&draft, &other).unwrap());
+        assert_eq!(v.lookup(&other, &email, 2).unwrap(), None);
+        assert!(!v.adopt(&draft, &chat).unwrap());
+        // What was adopted is on disk, sealed for its new scope.
+        drop(v);
+        let v = open(&dir, &key);
+        assert_eq!(v.lookup(&chat, &email, 1).unwrap().as_deref(), Some("ana@example.org"));
     }
 
     #[test]

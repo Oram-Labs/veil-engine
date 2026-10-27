@@ -61,6 +61,35 @@ impl MemoryVault {
         inner.created.clear();
     }
 
+    /// Copies every value of `from` into `into` under the same numbers, so
+    /// placeholders made in `from` mean the same in `into`. Only done while
+    /// `into` has never handed out or reserved a number; otherwise copies
+    /// nothing and returns false.
+    pub fn adopt(&self, from: &ScopeId, into: &ScopeId) -> bool {
+        let mut inner = self.lock();
+        if from == into || inner.counters.keys().any(|(scope, _)| scope == into) {
+            return false;
+        }
+        let counters: Vec<_> =
+            inner.counters.iter().filter(|((s, _), _)| s == from).map(|((_, k), n)| (k.clone(), *n)).collect();
+        let values: Vec<_> = inner
+            .by_number
+            .iter()
+            .filter(|((s, _, _), _)| s == from)
+            .map(|((_, k, n), v)| (k.clone(), *n, v.clone()))
+            .collect();
+        for (kind, n) in counters {
+            inner.counters.insert((into.clone(), kind), n);
+        }
+        let now = now();
+        for (kind, n, value) in values {
+            inner.by_value.insert((into.clone(), kind.clone(), value.clone()), n);
+            inner.by_number.insert((into.clone(), kind, n), value);
+            inner.created.push(now);
+        }
+        true
+    }
+
     /// A panic while holding the lock leaves the maps consistent (each
     /// change is a few inserts), so a poisoned lock is still usable.
     fn lock(&self) -> MutexGuard<'_, Inner> {
@@ -114,5 +143,25 @@ mod tests {
         assert!(v.is_empty() && v.oldest_created_at().is_none());
         assert_eq!(v.lookup(&scope, &kind, 1).unwrap(), None);
         assert_eq!(v.get_or_create(&scope, &kind, "a@example.com").unwrap(), 2);
+    }
+
+    #[test]
+    fn adopt_copies_a_scope_into_an_unused_one() {
+        let v = MemoryVault::default();
+        let (draft, chat, other) = (ScopeId::new("draft"), ScopeId::new("chat"), ScopeId::new("other"));
+        let email = EntityKind::new("EMAIL").unwrap();
+        assert_eq!(v.get_or_create(&draft, &email, "ana@example.org").unwrap(), 1);
+        assert_eq!(v.get_or_create(&draft, &email, "bob@example.org").unwrap(), 2);
+        assert!(v.adopt(&draft, &chat));
+        assert_eq!(v.lookup(&chat, &email, 2).unwrap().as_deref(), Some("bob@example.org"));
+        // The same values keep their numbers, and new ones come after.
+        assert_eq!(v.get_or_create(&chat, &email, "ana@example.org").unwrap(), 1);
+        assert_eq!(v.get_or_create(&chat, &email, "cy@example.org").unwrap(), 3);
+        // A scope that has handed out numbers is never written over.
+        v.get_or_create(&other, &email, "cy@example.org").unwrap();
+        assert!(!v.adopt(&draft, &other));
+        assert_eq!(v.lookup(&other, &email, 2).unwrap(), None);
+        assert!(!v.adopt(&draft, &chat));
+        assert!(!v.adopt(&draft, &draft));
     }
 }

@@ -3,7 +3,7 @@ resolver = "2"
 members = ["crates/engine", "crates/vault"]
 
 [workspace.package]
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 license = "Apache-2.0"
 repository = "https://github.com/Oram-Labs/veil-engine"
@@ -12,7 +12,7 @@ publish = true
 # The dependency versions below are copied from the Veil app's workspace when
 # this repository is exported, so both build against the same versions.
 [workspace.dependencies]
-veil-engine = { path = "crates/engine", version = "0.2.0" }
+veil-engine = { path = "crates/engine", version = "0.2.1" }
 aes-gcm = "0.10"
 aho-corasick = "1"
 arc-swap = "1"

@@ -39,6 +39,15 @@ pub trait ManagedVault: Vault {
     fn clear(&self) -> Result<(), Error>;
     /// Deletes entries not used within the time-to-live. Returns how many.
     fn purge_expired(&self) -> Result<u64, Error>;
+    /// Copies every value of `from` into `into` under the same numbers, so
+    /// placeholders made in `from` mean the same in `into`: for example a
+    /// document redacted before its conversation had an ID. Only done while
+    /// `into` has never handed out or reserved a number; otherwise copies
+    /// nothing and returns false. The default copies nothing.
+    fn adopt(&self, from: &ScopeId, into: &ScopeId) -> Result<bool, Error> {
+        let _ = (from, into);
+        Ok(false)
+    }
 }
 
 /// A [`ManagedVault`] in memory: nothing touches disk and everything is lost
@@ -101,6 +110,10 @@ impl ManagedVault for RamVault {
     fn purge_expired(&self) -> Result<u64, Error> {
         Ok(0)
     }
+
+    fn adopt(&self, from: &ScopeId, into: &ScopeId) -> Result<bool, Error> {
+        Ok(self.vault.adopt(from, into))
+    }
 }
 
 #[cfg(test)]
@@ -126,5 +139,16 @@ mod tests {
         assert_eq!(v.info().unwrap().entries, 0);
         assert_eq!(v.bound_scope("resp_1").unwrap(), None);
         assert_eq!(v.get_or_create(&conv, &kind, "a@example.com").unwrap(), 2, "numbers are not reused");
+    }
+
+    #[test]
+    fn ram_vault_adopt() {
+        let v = RamVault::default();
+        let (draft, chat) = (v.conversation_scope("draft"), v.conversation_scope("chat"));
+        let kind = EntityKind::new("EMAIL").unwrap();
+        v.get_or_create(&draft, &kind, "ana@example.org").unwrap();
+        assert!(v.adopt(&draft, &chat).unwrap());
+        assert_eq!(v.lookup(&chat, &kind, 1).unwrap().as_deref(), Some("ana@example.org"));
+        assert!(!v.adopt(&draft, &chat).unwrap());
     }
 }
