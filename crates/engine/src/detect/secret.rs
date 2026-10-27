@@ -28,9 +28,10 @@ static EACH: LazyLock<Vec<Regex>> =
     LazyLock::new(|| PATTERNS.iter().map(|p| Regex::new(p).expect("valid secret regex")).collect());
 
 /// `key = value` assignments where the key names a secret. Only the value is redacted.
+/// The key may end a longer name, as in `.env` files: `DB_PASSWORD`, `AWS_SECRET_ACCESS_KEY`.
 static ASSIGNMENT: LazyLock<Regex> = LazyLock::new(|| {
     Regex::new(
-        r#"(?i)\b(?:api[_-]?key|secret(?:[_-]?key)?|access[_-]?key|client[_-]?secret|auth[_-]?token|token|passw(?:or)?d|pwd)["']?\s*[:=]\s*["']?([A-Za-z0-9_\-+/=.!@#$%^&*]{12,})"#,
+        r#"(?i)(?:\b|_)(?:api[_-]?key|secret(?:[_-]?key)?|access[_-]?key|client[_-]?secret|auth[_-]?token|token|passw(?:or)?d|pwd)["']?\s*[:=]\s*["']?([A-Za-z0-9_\-+/=.!@#$%^&*]{12,})"#,
     )
     .expect("valid assignment regex")
 });
